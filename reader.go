@@ -1319,6 +1319,9 @@ func (r *reader) initialize(ctx context.Context, offset int64) (conn *Conn, star
 
 		case offset < first:
 			offset = first
+
+		case offset > last:
+			offset = first
 		}
 
 		r.withLogger(func(log Logger) {
