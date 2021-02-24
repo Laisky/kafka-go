@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"sync"
 
+	kafka "github.com/Laisky/kafka-go"
 	zstdlib "github.com/klauspost/compress/zstd"
-	kafka "github.com/segmentio/kafka-go"
 )
 
 func init() {

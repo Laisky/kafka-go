@@ -4,8 +4,8 @@ import (
 	"io"
 	"sync"
 
+	kafka "github.com/Laisky/kafka-go"
 	"github.com/pierrec/lz4"
-	kafka "github.com/segmentio/kafka-go"
 )
 
 func init() {

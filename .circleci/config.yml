@@ -1,7 +1,7 @@
 version: 2
 jobs:
   kafka-010:
-    working_directory: /go/src/github.com/segmentio/kafka-go
+    working_directory: /go/src/github.com/Laisky/kafka-go
     environment:
       KAFKA_VERSION: "0.10.1"
     docker:
@@ -31,7 +31,7 @@ jobs:
       - run: go test -v -race -cover -timeout 150s . ./gzip ./lz4 ./sasl ./snappy
 
   kafka-011:
-    working_directory: /go/src/github.com/segmentio/kafka-go
+    working_directory: /go/src/github.com/Laisky/kafka-go
     environment:
       KAFKA_VERSION: "0.11.0"
     docker:
@@ -62,7 +62,7 @@ jobs:
       - run: go test -v -race -cover -timeout 150s . ./gzip ./lz4 ./sasl ./snappy
 
   kafka-111:
-    working_directory: /go/src/github.com/segmentio/kafka-go
+    working_directory: /go/src/github.com/Laisky/kafka-go
     environment:
       KAFKA_VERSION: "1.1.1"
     docker:
@@ -93,7 +93,7 @@ jobs:
       - run: go test -v -race -cover -timeout 150s . ./gzip ./lz4 ./sasl ./snappy
 
   kafka-210:
-    working_directory: /go/src/github.com/segmentio/kafka-go
+    working_directory: /go/src/github.com/Laisky/kafka-go
     environment:
       KAFKA_VERSION: "2.1.0"
     docker:

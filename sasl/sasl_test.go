@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/segmentio/kafka-go"
-	"github.com/segmentio/kafka-go/sasl"
-	"github.com/segmentio/kafka-go/sasl/plain"
-	"github.com/segmentio/kafka-go/sasl/scram"
-	ktesting "github.com/segmentio/kafka-go/testing"
+	"github.com/Laisky/kafka-go"
+	"github.com/Laisky/kafka-go/sasl"
+	"github.com/Laisky/kafka-go/sasl/plain"
+	"github.com/Laisky/kafka-go/sasl/scram"
+	ktesting "github.com/Laisky/kafka-go/testing"
 )
 
 const (

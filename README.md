@@ -1,4 +1,4 @@
-# kafka-go [![CircleCI](https://circleci.com/gh/segmentio/kafka-go.svg?style=shield)](https://circleci.com/gh/segmentio/kafka-go) [![Go Report Card](https://goreportcard.com/badge/github.com/segmentio/kafka-go)](https://goreportcard.com/report/github.com/segmentio/kafka-go) [![GoDoc](https://godoc.org/github.com/segmentio/kafka-go?status.svg)](https://godoc.org/github.com/segmentio/kafka-go)
+# kafka-go [![CircleCI](https://circleci.com/gh/segmentio/kafka-go.svg?style=shield)](https://circleci.com/gh/segmentio/kafka-go) [![Go Report Card](https://goreportcard.com/badge/github.com/Laisky/kafka-go)](https://goreportcard.com/report/github.com/Laisky/kafka-go) [![GoDoc](https://godoc.org/github.com/Laisky/kafka-go?status.svg)](https://godoc.org/github.com/Laisky/kafka-go)
 
 ## Motivations
 
@@ -37,9 +37,9 @@ some features available from the Kafka API may not be implemented yet.
 
 ## Golang version
 
-`kafka-go` is currently compatible with golang version from 1.12+. To use with older versions of golang use release [v0.2.5](https://github.com/segmentio/kafka-go/releases/tag/v0.2.5).
+`kafka-go` is currently compatible with golang version from 1.12+. To use with older versions of golang use release [v0.2.5](https://github.com/Laisky/kafka-go/releases/tag/v0.2.5).
 
-## Connection [![GoDoc](https://godoc.org/github.com/segmentio/kafka-go?status.svg)](https://godoc.org/github.com/segmentio/kafka-go#Conn)
+## Connection [![GoDoc](https://godoc.org/github.com/Laisky/kafka-go?status.svg)](https://godoc.org/github.com/Laisky/kafka-go#Conn)
 
 The `Conn` type is the core of the `kafka-go` package. It wraps around a raw
 network connection to expose a low-level API to a Kafka server.
@@ -87,7 +87,7 @@ conn.Close()
 Because it is low level, the `Conn` type turns out to be a great building block
 for higher level abstractions, like the `Reader` for example.
 
-## Reader [![GoDoc](https://godoc.org/github.com/segmentio/kafka-go?status.svg)](https://godoc.org/github.com/segmentio/kafka-go#Reader)
+## Reader [![GoDoc](https://godoc.org/github.com/Laisky/kafka-go?status.svg)](https://godoc.org/github.com/Laisky/kafka-go#Reader)
 
 A `Reader` is another concept exposed by the `kafka-go` package, which intends
 to make it simpler to implement the typical use case of consuming from a single
@@ -190,7 +190,7 @@ r := kafka.NewReader(kafka.ReaderConfig{
 })
 ```
 
-## Writer [![GoDoc](https://godoc.org/github.com/segmentio/kafka-go?status.svg)](https://godoc.org/github.com/segmentio/kafka-go#Writer)
+## Writer [![GoDoc](https://godoc.org/github.com/Laisky/kafka-go?status.svg)](https://godoc.org/github.com/Laisky/kafka-go#Writer)
 
 To produce messages to Kafka, a program may use the low-level `Conn` API, but
 the package also provides a higher level `Writer` type which is more appropriate
@@ -286,14 +286,14 @@ w := kafka.NewWriter(kafka.WriterConfig{
 })
 ```
 
-The `Reader` will by determine if the consumed messages are compressed by 
-examining the message attributes.  However, the package(s) for all expected 
-codecs must be imported so that they get loaded correctly.  For example, if you 
+The `Reader` will by determine if the consumed messages are compressed by
+examining the message attributes.  However, the package(s) for all expected
+codecs must be imported so that they get loaded correctly.  For example, if you
 are going to be receiving messages compressed with Snappy, add the following
 import:
 
 ```go
-import _ "github.com/segmentio/kafka-go/snappy"
+import _ "github.com/Laisky/kafka-go/snappy"
 ```
 
 ## TLS Support

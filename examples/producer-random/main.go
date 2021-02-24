@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
+	kafka "github.com/Laisky/kafka-go"
 	"github.com/google/uuid"
-	kafka "github.com/segmentio/kafka-go"
 )
 
 func newKafkaWriter(kafkaURL, topic string) *kafka.Writer {

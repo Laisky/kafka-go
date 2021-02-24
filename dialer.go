@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/segmentio/kafka-go/sasl"
+	"github.com/Laisky/kafka-go/sasl"
 )
 
 // The Dialer type mirrors the net.Dialer API but is designed to open kafka
