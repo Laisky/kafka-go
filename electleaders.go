@@ -20,6 +20,7 @@ type ElectLeadersRequest struct {
 	Partitions []int
 
 	// Timeout is the amount of time to wait for the election to run.
+	// If zero, the client timeout policy is used with a two-second default.
 	Timeout time.Duration
 }
 
@@ -46,6 +47,10 @@ func (c *Client) ElectLeaders(
 	ctx context.Context,
 	req *ElectLeadersRequest,
 ) (*ElectLeadersResponse, error) {
+	timeout := req.Timeout
+	if timeout == 0 {
+		timeout = c.timeout(ctx, 2*time.Second)
+	}
 	partitions32 := []int32{}
 	for _, partition := range req.Partitions {
 		partitions32 = append(partitions32, int32(partition))
@@ -61,7 +66,7 @@ func (c *Client) ElectLeaders(
 					PartitionIDs: partitions32,
 				},
 			},
-			TimeoutMs: int32(req.Timeout.Milliseconds()),
+			TimeoutMs: int32(timeout.Milliseconds()),
 		},
 	)
 	if err != nil {

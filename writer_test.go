@@ -294,16 +294,21 @@ func readOffset(topic string, partition int) (offset int64, err error) {
 }
 
 func readPartition(topic string, partition int, offset int64) (msgs []Message, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	var conn *Conn
 
-	if conn, err = DialLeader(context.Background(), "tcp", "localhost:9092", topic, partition); err != nil {
+	if conn, err = DialLeader(ctx, "tcp", "localhost:9092", topic, partition); err != nil {
 		return
 	}
 	defer conn.Close()
 
-	conn.Seek(offset, SeekAbsolute)
-	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	batch := conn.ReadBatch(0, 1000000000)
+	deadline, _ := ctx.Deadline()
+	conn.SetDeadline(deadline)
+	if _, err = conn.Seek(offset, SeekAbsolute); err != nil {
+		return
+	}
+	batch := conn.ReadBatchWith(ReadBatchConfig{MinBytes: 0, MaxBytes: 1000000000, MaxWait: 10 * time.Millisecond})
 	defer batch.Close()
 
 	for {

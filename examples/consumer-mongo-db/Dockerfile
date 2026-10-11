@@ -1,11 +1,7 @@
 #####################################
 #   STEP 1 build executable binary  #
 #####################################
-FROM golang:alpine AS builder
-
-# Install git.
-# Git is required for fetching the dependencies.
-RUN apk update && apk add --no-cache git
+FROM golang:1.26.9-bookworm AS builder
 
 WORKDIR /app
 
@@ -26,6 +22,7 @@ FROM scratch
 
 # Copy our static executable.
 COPY --from=builder /app/main /app/main
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # Run the hello binary.
 ENTRYPOINT ["/app/main"]

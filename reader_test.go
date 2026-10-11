@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math/rand"
 	"net"
@@ -281,6 +282,8 @@ func createTopic(t *testing.T, topic string, partitions int) {
 		t.Fatal(err)
 	}
 
+	defer conn.Close()
+
 	conn.SetDeadline(time.Now().Add(2 * time.Second))
 
 	_, err = conn.createTopics(createTopicsRequestV0{
@@ -302,6 +305,36 @@ func createTopic(t *testing.T, topic string, partitions int) {
 		t.Error(err)
 		t.FailNow()
 	}
+	// A controller acknowledgement can precede leader availability. Confirm
+	// an actual fetch on every expected partition before returning the fixture.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for partition := 0; partition < partitions; partition++ {
+		for {
+			leader, fetchErr := DialLeader(ctx, "tcp", "localhost:9092", topic, partition)
+			if fetchErr == nil {
+				deadline, _ := ctx.Deadline()
+				if bound := time.Now().Add(2 * time.Second); bound.Before(deadline) {
+					deadline = bound
+				}
+				leader.SetDeadline(deadline)
+				if _, fetchErr = leader.Seek(0, SeekAbsolute|SeekDontCheck); fetchErr == nil {
+					batch := leader.ReadBatchWith(ReadBatchConfig{MinBytes: 0, MaxBytes: 1024, MaxWait: 10 * time.Millisecond})
+					fetchErr = batch.Close()
+				}
+				leader.Close()
+			}
+			if fetchErr == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("topic %s partition %d leader readiness: %v; %v", topic, partition, fetchErr, ctx.Err())
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}
+
 }
 
 func deleteTopic(t *testing.T, topic ...string) {
@@ -435,25 +468,36 @@ func makeTestSequence(n int) []Message {
 }
 
 func prepareReader(t *testing.T, ctx context.Context, r *Reader, msgs ...Message) {
-	var config = r.Config()
-	var conn *Conn
-	var err error
-
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	config := r.Config()
 	for {
-		if conn, err = DialLeader(ctx, "tcp", "localhost:9092", config.Topic, config.Partition); err == nil {
-			break
+		conn, err := DialLeader(ctx, "tcp", "localhost:9092", config.Topic, config.Partition)
+		if err == nil {
+			deadline, _ := ctx.Deadline()
+			conn.SetWriteDeadline(deadline)
+			if err = conn.SetRequiredAcks(int(RequireAll)); err != nil {
+				conn.Close()
+				t.Fatal(err)
+			}
+			var n int
+			n, err = conn.WriteMessages(msgs...)
+			conn.Close()
+			if err == nil {
+				return
+			}
+			// Topic metadata can precede leader readiness. A rejected zero-byte
+			// write is safe to retry; successful/partial writes are never replayed.
+			if n != 0 || !errors.Is(err, NotLeaderForPartition) {
+				t.Fatal(err)
+			}
 		}
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(50 * time.Millisecond):
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-	}
-
-	defer conn.Close()
-
-	if _, err := conn.WriteMessages(msgs...); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -778,6 +822,7 @@ func TestReaderConsumerGroup(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		test := test
 		t.Run(test.scenario, func(t *testing.T) {
 			// It appears that some of the tests depend on all these tests being
 			// run concurrently to pass... this is brittle and should be fixed
@@ -923,11 +968,12 @@ func testReaderConsumerGroupReadContentAcrossPartitions(t *testing.T, ctx contex
 	defer shutdown()
 
 	writer := &Writer{
-		Addr:      TCP(r.config.Brokers...),
-		Topic:     r.config.Topic,
-		Balancer:  &RoundRobin{},
-		BatchSize: 1,
-		Transport: client.Transport,
+		RequiredAcks: RequireAll,
+		Addr:         TCP(r.config.Brokers...),
+		Topic:        r.config.Topic,
+		Balancer:     &RoundRobin{},
+		BatchSize:    1,
+		Transport:    client.Transport,
 	}
 	if err := writer.WriteMessages(ctx, makeTestSequence(N)...); err != nil {
 		t.Fatalf("bad write messages: %v", err)
@@ -951,8 +997,23 @@ func testReaderConsumerGroupReadContentAcrossPartitions(t *testing.T, ctx contex
 }
 
 func testReaderConsumerGroupRebalance(t *testing.T, ctx context.Context, r *Reader) {
+	// Establish a first generation so the second member tests a real rebalance.
+	var firstVersion int64
+	for firstVersion <= 1 {
+		r.mutex.Lock()
+		firstVersion = r.version
+		r.mutex.Unlock()
+		if firstVersion > 1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("initial consumer generation: %v", ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
 	r2 := NewReader(r.config)
-	defer r.Close()
+	defer r2.Close()
 
 	const (
 		N          = 12
@@ -962,13 +1023,33 @@ func testReaderConsumerGroupRebalance(t *testing.T, ctx context.Context, r *Read
 	client, shutdown := newLocalClient()
 	defer shutdown()
 
+	// Produce only after the first member has rebalanced and the second has
+	// subscribed. Earlier production can be prefetched by the first generation.
+	for {
+		r.mutex.Lock()
+		firstRebalanced := r.version > firstVersion
+		r.mutex.Unlock()
+		r2.mutex.Lock()
+		secondSubscribed := r2.version > 1
+		r2.mutex.Unlock()
+		if firstRebalanced && secondSubscribed {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("two-member partition assignment: %v", ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+
 	// rebalance should result in 12 message in each of the partitions
 	writer := &Writer{
-		Addr:      TCP(r.config.Brokers...),
-		Topic:     r.config.Topic,
-		Balancer:  &RoundRobin{},
-		BatchSize: 1,
-		Transport: client.Transport,
+		RequiredAcks: RequireAll,
+		Addr:         TCP(r.config.Brokers...),
+		Topic:        r.config.Topic,
+		Balancer:     &RoundRobin{},
+		BatchSize:    1,
+		Transport:    client.Transport,
 	}
 	if err := writer.WriteMessages(ctx, makeTestSequence(N*partitions)...); err != nil {
 		t.Fatalf("bad write messages: %v", err)
@@ -1004,7 +1085,7 @@ func testReaderConsumerGroupRebalanceAcrossTopics(t *testing.T, ctx context.Cont
 		MaxBytes:          r.config.MaxBytes,
 		Logger:            r.config.Logger,
 	})
-	defer r.Close()
+	defer r2.Close()
 	prepareReader(t, ctx, r2, makeTestSequence(1)...)
 
 	const (
@@ -1013,11 +1094,12 @@ func testReaderConsumerGroupRebalanceAcrossTopics(t *testing.T, ctx context.Cont
 
 	// write messages across both partitions
 	writer := &Writer{
-		Addr:      TCP(r.config.Brokers...),
-		Topic:     r.config.Topic,
-		Balancer:  &RoundRobin{},
-		BatchSize: 1,
-		Transport: client.Transport,
+		RequiredAcks: RequireAll,
+		Addr:         TCP(r.config.Brokers...),
+		Topic:        r.config.Topic,
+		Balancer:     &RoundRobin{},
+		BatchSize:    1,
+		Transport:    client.Transport,
 	}
 	if err := writer.WriteMessages(ctx, makeTestSequence(N)...); err != nil {
 		t.Fatalf("bad write messages: %v", err)
@@ -1069,11 +1151,12 @@ func testReaderConsumerGroupRebalanceAcrossManyPartitionsAndConsumers(t *testing
 
 	// write messages across both partitions
 	writer := &Writer{
-		Addr:      TCP(r.config.Brokers...),
-		Topic:     r.config.Topic,
-		Balancer:  &RoundRobin{},
-		BatchSize: 1,
-		Transport: client.Transport,
+		RequiredAcks: RequireAll,
+		Addr:         TCP(r.config.Brokers...),
+		Topic:        r.config.Topic,
+		Balancer:     &RoundRobin{},
+		BatchSize:    1,
+		Transport:    client.Transport,
 	}
 	if err := writer.WriteMessages(ctx, makeTestSequence(N*3)...); err != nil {
 		t.Fatalf("bad write messages: %v", err)
@@ -1263,7 +1346,8 @@ func TestCommitOffsetsWithRetry(t *testing.T) {
 // than partitions in a group.
 // https://github.com/segmentio/kafka-go/issues/200
 func TestRebalanceTooManyConsumers(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	conf := ReaderConfig{
 		Brokers: []string{"localhost:9092"},
 		GroupID: makeGroupID(),
@@ -1271,15 +1355,24 @@ func TestRebalanceTooManyConsumers(t *testing.T) {
 		MaxWait: time.Second,
 	}
 
+	// Establish the single-partition topic before group membership starts.
+	// Initial group metadata must not race broker auto-creation.
+	_, shutdown := newLocalClientWithTopic(conf.Topic, 1)
+	defer shutdown()
+
 	// Create the first reader and wait for it to become the leader.
 	r1 := NewReader(conf)
+	defer r1.Close()
 	prepareReader(t, ctx, r1, makeTestSequence(1)...)
-	r1.ReadMessage(ctx)
+	if _, err := r1.ReadMessage(ctx); err != nil {
+		t.Fatalf("initial reader message: %v", err)
+	}
 	// Clear the stats from the first rebalance.
 	r1.Stats()
 
 	// Second reader should cause one rebalance for each r1 and r2.
 	r2 := NewReader(conf)
+	defer r2.Close()
 
 	// Wait for rebalances.
 	time.Sleep(5 * time.Second)
@@ -1321,6 +1414,7 @@ func TestConsumerGroupWithMissingTopic(t *testing.T) {
 	defer shutdown()
 
 	w := &Writer{
+		RequiredAcks: RequireAll,
 		Addr:         TCP(r.config.Brokers...),
 		Topic:        r.config.Topic,
 		BatchTimeout: 10 * time.Millisecond,
@@ -1343,43 +1437,21 @@ func TestConsumerGroupWithMissingTopic(t *testing.T) {
 }
 
 func getOffsets(t *testing.T, config ReaderConfig) map[int]int64 {
-	// minimal config required to lookup coordinator
-	cg := ConsumerGroup{
-		config: ConsumerGroupConfig{
-			ID:      config.GroupID,
-			Brokers: config.Brokers,
-			Dialer:  config.Dialer,
-		},
-	}
-
-	conn, err := cg.coordinator()
+	t.Helper()
+	client, shutdown := newClient(TCP(config.Brokers...))
+	defer shutdown()
+	offsets, err := client.OffsetFetch(context.Background(), &OffsetFetchRequest{GroupID: config.GroupID, Topics: map[string][]int{config.Topic: {0}}})
 	if err != nil {
-		t.Errorf("unable to connect to coordinator: %v", err)
+		t.Fatalf("fetch committed offsets: %v", err)
 	}
-	defer conn.Close()
-
-	offsets, err := conn.offsetFetch(offsetFetchRequestV1{
-		GroupID: config.GroupID,
-		Topics: []offsetFetchRequestV1Topic{{
-			Topic:      config.Topic,
-			Partitions: []int32{0},
-		}},
-	})
-	if err != nil {
-		t.Errorf("bad fetchOffsets: %v", err)
-	}
-
-	m := map[int]int64{}
-
-	for _, r := range offsets.Responses {
-		if r.Topic == config.Topic {
-			for _, p := range r.PartitionResponses {
-				m[int(p.Partition)] = p.Offset
-			}
+	result := map[int]int64{}
+	for _, partition := range offsets.Topics[config.Topic] {
+		if partition.Error != nil {
+			t.Fatalf("partition offset fetch: %v", partition.Error)
 		}
+		result[partition.Partition] = partition.CommittedOffset
 	}
-
-	return m
+	return result
 }
 
 const (

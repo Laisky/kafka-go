@@ -6,12 +6,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/mongodb/mongo-go-driver/mongo"
 	kafka "github.com/segmentio/kafka-go"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func getMongoCollection(mongoURL, dbName, collectionName string) *mongo.Collection {
-	client, err := mongo.Connect(context.Background(), mongoURL)
+	client, err := mongo.Connect(options.Client().ApplyURI(mongoURL))
 	if err != nil {
 		log.Fatal(err)
 	}

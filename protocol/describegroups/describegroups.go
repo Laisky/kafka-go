@@ -74,6 +74,9 @@ func (r *Response) Merge(requests []protocol.Message, results []interface{}) (
 	response := &Response{}
 
 	for _, result := range results {
+		if err, ok := result.(error); ok {
+			return nil, err
+		}
 		subResp := result.(*Response)
 
 		for _, group := range subResp.Groups {

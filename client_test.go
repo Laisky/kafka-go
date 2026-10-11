@@ -129,11 +129,12 @@ func testConsumerGroupFetchOffsets(t *testing.T, ctx context.Context, client *Cl
 	brokers := []string{"localhost:9092"}
 
 	writer := &Writer{
-		Addr:      TCP(brokers...),
-		Topic:     topic,
-		Balancer:  &RoundRobin{},
-		BatchSize: 1,
-		Transport: client.Transport,
+		RequiredAcks: RequireAll,
+		Addr:         TCP(brokers...),
+		Topic:        topic,
+		Balancer:     &RoundRobin{},
+		BatchSize:    1,
+		Transport:    client.Transport,
 	}
 	if err := writer.WriteMessages(ctx, makeTestSequence(totalMessages)...); err != nil {
 		t.Fatalf("bad write messages: %v", err)

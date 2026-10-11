@@ -7,7 +7,7 @@ jobs:
     environment:
       KAFKA_VERSION: "0.10.1"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -49,7 +49,7 @@ jobs:
     environment:
       KAFKA_VERSION: "0.11.0"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -80,7 +80,7 @@ jobs:
     environment:
       KAFKA_VERSION: "1.0.1"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -96,7 +96,7 @@ jobs:
     environment:
       KAFKA_VERSION: "1.1.1"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -112,7 +112,7 @@ jobs:
     environment:
       KAFKA_VERSION: "2.0.1"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -128,7 +128,7 @@ jobs:
     environment:
       KAFKA_VERSION: "2.1.1"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -144,7 +144,7 @@ jobs:
     environment:
       KAFKA_VERSION: "2.2.2"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -160,7 +160,7 @@ jobs:
     environment:
       KAFKA_VERSION: "2.3.1"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
@@ -187,7 +187,7 @@ jobs:
       # TODO: Figure out why these are happening and fix them (they don't appear to be new).
       KAFKA_SKIP_NETTEST: "1"
     docker:
-    - image: circleci/golang
+    - image: golang:1.26.9-bookworm
     - image: wurstmeister/zookeeper
       ports:
       - 2181:2181
