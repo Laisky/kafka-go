@@ -211,7 +211,7 @@ func (r *Reader) commitLoopInterval(ctx context.Context, gen *Generation) {
 
 	commit := func() {
 		if err := r.commitOffsetsWithRetry(gen, offsets, defaultCommitRetries); err != nil {
-			r.withErrorLogger(func(l Logger) { l.Printf(err.Error()) })
+			r.withErrorLogger(func(l Logger) { l.Printf("%s", err.Error()) })
 		} else {
 			offsets.reset()
 		}
@@ -284,7 +284,7 @@ func (r *Reader) run(cg *ConsumerGroup) {
 			}
 			r.stats.errors.observe(1)
 			r.withErrorLogger(func(l Logger) {
-				l.Printf(err.Error())
+				l.Printf("%s", err.Error())
 			})
 			// Continue with next attempt...
 		}

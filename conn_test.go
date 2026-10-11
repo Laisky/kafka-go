@@ -3,12 +3,14 @@ package kafka
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,31 +27,63 @@ func (*timeout) Timeout() bool   { return true }
 // connPipe is an adapter that implements the net.Conn interface on top of
 // two client kafka connections to pass the nettest.TestConn test suite.
 type connPipe struct {
-	rconn *Conn
-	wconn *Conn
+	rconn      *Conn
+	wconn      *Conn
+	readMu     sync.Mutex
+	buffered   []byte
+	eof        bool
+	deadlineMu sync.RWMutex
+	readUntil  time.Time
+	writeUntil time.Time
 }
 
 func (c *connPipe) Close() error {
-	b := [1]byte{} // marker that the connection has been closed
-	c.wconn.SetWriteDeadline(time.Time{})
-	c.wconn.Write(b[:])
+	c.wconn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	c.wconn.WriteMessages(Message{Key: []byte("conn-pipe-close")})
 	c.wconn.Close()
 	c.rconn.Close()
 	return nil
 }
 
 func (c *connPipe) Read(b []byte) (int, error) {
-	// See comments in Write.
-	time.Sleep(time.Millisecond)
-	if t := c.rconn.readDeadline(); !t.IsZero() {
-		return 0, &timeout{}
+	if len(b) == 0 {
+		return 0, nil
 	}
-	n, err := c.rconn.Read(b)
-	if n == 1 && b[0] == 0 {
-		c.rconn.Close()
-		n, err = 0, io.EOF
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	for len(c.buffered) == 0 {
+		if c.eof {
+			return 0, io.EOF
+		}
+		// Keep fetches bounded instead of using the unlimited broker wait.
+		// The pipe models a byte stream; Kafka message boundaries are buffered.
+		time.Sleep(time.Millisecond)
+		c.deadlineMu.RLock()
+		deadline := c.readUntil
+		c.deadlineMu.RUnlock()
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return 0, &timeout{}
+		}
+		batch := c.rconn.ReadBatchWith(ReadBatchConfig{MinBytes: 1, MaxBytes: 2 << 20, MaxWait: 100 * time.Millisecond})
+		msg, err := batch.ReadMessage()
+		err = coalesceErrors(silentEOF(err), batch.Close())
+		if errors.Is(err, RequestTimedOut) {
+			// As in reader.read, a broker fetch timeout carries no record and
+			// is safe to retry without advancing the stream.
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if bytes.Equal(msg.Key, []byte("conn-pipe-close")) {
+			c.eof = true
+			return 0, io.EOF
+		}
+		c.buffered = msg.Value
 	}
-	return n, err
+	n := copy(b, c.buffered)
+	c.buffered = c.buffered[n:]
+	return n, nil
 }
 
 func (c *connPipe) Write(b []byte) (int, error) {
@@ -64,10 +98,14 @@ func (c *connPipe) Write(b []byte) (int, error) {
 	// The nettest code only sets deadlines when it expects the write to time
 	// out.  The broker connection is alive and able to accept data, so we need
 	// to simulate the timeout in order to get the tests to pass.
-	if t := c.wconn.writeDeadline(); !t.IsZero() {
+	c.deadlineMu.RLock()
+	deadline := c.writeUntil
+	c.deadlineMu.RUnlock()
+	if !deadline.IsZero() {
 		return 0, &timeout{}
 	}
 
+	c.wconn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	return c.wconn.Write(b)
 }
 
@@ -80,17 +118,23 @@ func (c *connPipe) RemoteAddr() net.Addr {
 }
 
 func (c *connPipe) SetDeadline(t time.Time) error {
-	c.rconn.SetDeadline(t)
-	c.wconn.SetDeadline(t)
+	c.deadlineMu.Lock()
+	c.readUntil = t
+	c.writeUntil = t
+	c.deadlineMu.Unlock()
 	return nil
 }
-
 func (c *connPipe) SetReadDeadline(t time.Time) error {
-	return c.rconn.SetReadDeadline(t)
+	c.deadlineMu.Lock()
+	c.readUntil = t
+	c.deadlineMu.Unlock()
+	return nil
 }
-
 func (c *connPipe) SetWriteDeadline(t time.Time) error {
-	return c.wconn.SetWriteDeadline(t)
+	c.deadlineMu.Lock()
+	c.writeUntil = t
+	c.deadlineMu.Unlock()
+	return nil
 }
 
 func init() {
@@ -333,6 +377,12 @@ func TestConn(t *testing.T) {
 			}
 			if t2Writer, err = dialer.DialLeader(ctx, tcp, kafka, topic2, 0); err != nil {
 				return
+			}
+
+			for _, writer := range []*Conn{t1Writer, t2Writer} {
+				if err = writer.SetRequiredAcks(int(RequireAll)); err != nil {
+					return
+				}
 			}
 
 			stop = func() {
@@ -1044,12 +1094,24 @@ func testDeleteTopicsInvalidTopic(t *testing.T, conn *Conn) {
 	if err != UnknownTopicOrPartition {
 		t.Fatalf("expected UnknownTopicOrPartition error, but got %v", err)
 	}
-	partitions, err := conn.ReadPartitions(topic)
-	if err != nil {
-		t.Fatalf("bad ReadPartitions: %v", err)
-	}
-	if len(partitions) != 0 {
-		t.Fatal("expected partitions to be empty")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		// Reading all metadata does not auto-create the just-deleted topic.
+		partitions, err := conn.ReadPartitions()
+		if err != nil {
+			t.Fatalf("bad ReadPartitions: %v", err)
+		}
+		present := false
+		for _, partition := range partitions {
+			present = present || partition.Topic == topic
+		}
+		if !present {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected partitions to be empty after topic deletion")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

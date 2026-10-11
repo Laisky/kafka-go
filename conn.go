@@ -704,6 +704,9 @@ func (c *Conn) Seek(offset int64, whence int) (int64, error) {
 // This method is provided to satisfy the net.Conn interface but is much less
 // efficient than using the more general purpose ReadBatch method.
 func (c *Conn) Read(b []byte) (int, error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
 	batch := c.ReadBatch(1, len(b))
 	n, err := batch.Read(b)
 	return n, coalesceErrors(silentEOF(err), batch.Close())
@@ -854,6 +857,13 @@ func (c *Conn) ReadBatchWith(cfg ReadBatchConfig) *Batch {
 	default:
 		throttle, highWaterMark, remain, err = readFetchResponseHeaderV2(&c.rbuf, size)
 	}
+	// Broker errors may arrive before the parser consumes the complete body.
+	// Drain this frame so a retry reads the next correlation ID, not stale bytes.
+	if _, brokerError := err.(Error); brokerError {
+		if _, discardErr := discardN(&c.rbuf, remain, remain); discardErr != nil {
+			err = discardErr
+		}
+	}
 	if err == errShortRead {
 		err = checkTimeoutErr(adjustedDeadline)
 	}
@@ -861,7 +871,11 @@ func (c *Conn) ReadBatchWith(cfg ReadBatchConfig) *Batch {
 	var msgs *messageSetReader
 	if err == nil {
 		if highWaterMark == offset {
-			msgs = &messageSetReader{empty: true}
+			// An empty watermark can still accompany record bytes. Preserve the
+			// existing empty-batch result while consuming the whole response.
+			if _, err = discardN(&c.rbuf, remain, remain); err == nil {
+				msgs = &messageSetReader{empty: true}
+			}
 		} else {
 			msgs, err = newMessageSetReader(&c.rbuf, remain)
 		}

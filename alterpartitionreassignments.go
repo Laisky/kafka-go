@@ -20,6 +20,7 @@ type AlterPartitionReassignmentsRequest struct {
 	Assignments []AlterPartitionReassignmentsRequestAssignment
 
 	// Timeout is the amount of time to wait for the request to complete.
+	// If zero, the client timeout policy is used with a two-second default.
 	Timeout time.Duration
 }
 
@@ -58,6 +59,10 @@ func (c *Client) AlterPartitionReassignments(
 	ctx context.Context,
 	req *AlterPartitionReassignmentsRequest,
 ) (*AlterPartitionReassignmentsResponse, error) {
+	timeout := req.Timeout
+	if timeout == 0 {
+		timeout = c.timeout(ctx, 2*time.Second)
+	}
 	apiPartitions := []alterpartitionreassignments.RequestPartition{}
 
 	for _, assignment := range req.Assignments {
@@ -76,7 +81,7 @@ func (c *Client) AlterPartitionReassignments(
 	}
 
 	apiReq := &alterpartitionreassignments.Request{
-		TimeoutMs: int32(req.Timeout.Milliseconds()),
+		TimeoutMs: int32(timeout.Milliseconds()),
 		Topics: []alterpartitionreassignments.RequestTopic{
 			{
 				Name:       req.Topic,

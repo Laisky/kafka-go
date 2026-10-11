@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-// ExampleAWSRackLocal shows how the RackAffinityGroupBalancer can be used to
+// ExampleRackAffinityGroupBalancer_awsRackLocal shows how the RackAffinityGroupBalancer can be used to
 // pair up consumers with brokers in the same AWS availability zone.  This code
 // assumes that each brokers' rack is configured to be the name of the AZ in
 // which it is running.
-func ExampleAWSRackLocal() {
+func ExampleRackAffinityGroupBalancer_awsRackLocal() {
 	r := NewReader(ReaderConfig{
 		Brokers: []string{"kafka:9092"},
 		GroupID: "my-group",
@@ -31,9 +31,9 @@ func ExampleAWSRackLocal() {
 }
 
 // findRack is the basic rack resolver strategy for use in AWS.  It supports
-//  * ECS with the task metadata endpoint enabled (returns the container
-//    instance's availability zone)
-//  * Linux EC2 (returns the instance's availability zone)
+//   - ECS with the task metadata endpoint enabled (returns the container
+//     instance's availability zone)
+//   - Linux EC2 (returns the instance's availability zone)
 func findRack() string {
 	switch whereAmI() {
 	case "ecs":
